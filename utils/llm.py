@@ -101,7 +101,7 @@ async def run_anthropic_model(
             "model": model,
             "betas": ["code-execution-2025-05-22"],
             "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": 1000,
+            "max_tokens": 64_000 if "sonnet" in model.lower() else 8_192,
             "system": system_prompt,
             "tools": [{"type": "code_execution_20250522", "name": "code_execution"}],
         },
@@ -118,7 +118,7 @@ async def run_anthropic_model(
 async def run_google_model(
     system_prompt: str,
     prompt: str,
-    model: str = "gemini-2.0-flash",
+    model: str = "gemini-2.0-flash-001",
     timeout: float = 30.0,
 ) -> Union[Any, str]:
     """
@@ -160,7 +160,7 @@ async def run_google_model(
 async def run_mistral_model(
     system_prompt: str,
     prompt: str,
-    model: str = "mistral-large-latest",
+    model: str = "mistral-small-latest",
     timeout: float = 30.0,
 ) -> Union[Any, str]:
     """
@@ -212,7 +212,7 @@ async def run_mistral_model(
 async def run_oai_model(
     system_prompt: str,
     prompt: str,
-    model: str = "gpt-4.1",
+    model: str = "gpt-4.1-nano",
     timeout: float = 30.0,
 ) -> Union[Any, str]:
     """
