@@ -8,11 +8,14 @@ utils/llm.py
 
 # Standard Library
 import asyncio
+import uuid
 import os
 from typing import Any, Callable, Awaitable, Dict, Union
 
 # Third Party
+import boto3
 from anthropic import AsyncAnthropic
+from botocore.exceptions import BotoCoreError
 from google import genai
 from google.genai import types as google_types
 from mistralai import Mistral
@@ -32,6 +35,7 @@ async def run_model(
 ) -> Union[Any, str]:
     """
     Execute an async model call with timeout and error handling.
+    If it fails for a reason besides timeout, try again up to 3 times.
 
     Args:
         client_method: Async function or coroutine to invoke (e.g., client.beta.messages.create).
@@ -42,13 +46,19 @@ async def run_model(
     Returns:
         The model response, or an error string if the call fails or times out.
     """
-    try:
-        resp = await asyncio.wait_for(client_method(**method_kwargs), timeout=timeout)
-        return resp
-    except asyncio.TimeoutError:
-        return f"{error_prefix}: Request exceeded set timeout of {timeout} seconds."
-    except Exception as e:
-        return f"{error_prefix}: {e}"
+    max_attempts = 3
+    last_exception = None
+    for attempt in range(max_attempts):
+        try:
+            resp = await asyncio.wait_for(client_method(**method_kwargs), timeout=timeout)
+            return resp
+        except asyncio.TimeoutError:
+            return f"{error_prefix}: Request exceeded set timeout of {timeout} seconds."
+        except Exception as e:
+            last_exception = e
+            # Only retry if not the last attempt
+            continue
+    return f"{error_prefix}: {last_exception}"
 
 
 def get_env_var(key: str) -> str:
@@ -178,17 +188,18 @@ async def run_google_model(
     
     parsed_response = ""
 
-    for part in response.candidates[0].content.parts:
-        if part.text is not None:
-            parsed_response += part.text
-        if part.executable_code is not None:
-            parsed_response += "\n<CODE>\n"
-            parsed_response += part.executable_code.code
-            parsed_response += "\n```\n</CODE>\n"
-        if part.code_execution_result is not None:
-            parsed_response += "<OUTPUT>\n"
-            parsed_response += part.code_execution_result.output
-            parsed_response += "</OUTPUT>\n"
+    if response.candidates[0].content.parts is not None:
+        for part in response.candidates[0].content.parts:
+            if part.text is not None:
+                parsed_response += part.text
+            if part.executable_code is not None:
+                parsed_response += "\n<CODE>\n"
+                parsed_response += part.executable_code.code
+                parsed_response += "\n```\n</CODE>\n"
+            if part.code_execution_result is not None:
+                parsed_response += "<OUTPUT>\n"
+                parsed_response += part.code_execution_result.output
+                parsed_response += "</OUTPUT>\n"
 
     return parsed_response
 
@@ -320,3 +331,73 @@ async def run_oai_model(
                     logs = out.get('logs', '')
                     parsed += f"<OUTPUT>\n{logs}</OUTPUT>\n"
     return parsed
+
+
+# ------------------------------------------------------------
+# AWS Bedrock Agent Runner
+# ------------------------------------------------------------
+
+async def run_aws_agent(
+    prompt: str,
+    model: str = "nova-micro",
+    session_id: str = None,
+    profile_name: str = None,
+    timeout: float = 30.0,
+) -> str:
+    """
+    Invoke an AWS Bedrock agent and return the completion as a string.
+
+    Args:
+        agent_id: The AWS Bedrock agent ID.
+        alias_id: The AWS Bedrock agent alias ID.
+        prompt: The user prompt to send to the agent.
+        session_id: Optional session ID. If not provided, a random one will be generated.
+        profile_name: Optional AWS profile name. If not provided, uses AWS_PROFILE env var or default.
+        timeout: Timeout for the agent call (not strictly enforced, but for API symmetry).
+
+    Returns:
+        The agent's completion as a string, or an error message.
+    """
+    def _sync_aws_call():
+        """Synchronous AWS operations to be run in executor."""
+        AWS_MODELS = {
+            "nova-micro": [os.getenv("NOVA_MICRO_AGENT_ID"), os.getenv("NOVA_MICRO_ALIAS_ID")], # these are already pre-configued with the system prompt on the AWS console
+            "nova-lite": [os.getenv("NOVA_LITE_AGENT_ID"), os.getenv("NOVA_LITE_ALIAS_ID")],
+            "nova-pro": [os.getenv("NOVA_PRO_AGENT_ID"), os.getenv("NOVA_PRO_ALIAS_ID")],
+            "nova-premier": [os.getenv("NOVA_PREMIER_AGENT_ID"), os.getenv("NOVA_PREMIER_ALIAS_ID")],
+        }
+
+        actual_profile_name = profile_name if profile_name else os.getenv("AWS_PROFILE", None)
+        session = boto3.Session(profile_name=actual_profile_name) if actual_profile_name else boto3.Session()
+        client = session.client("bedrock-agent-runtime")
+        actual_session_id = session_id if session_id else str(uuid.uuid4())
+        
+        response = client.invoke_agent(
+            agentId=AWS_MODELS[model][0],
+            agentAliasId=AWS_MODELS[model][1],
+            enableTrace=True,
+            sessionId=actual_session_id,
+            inputText=prompt,
+        )
+        
+        completion = ""
+        for event in response.get("completion", []):
+            if 'chunk' in event:
+                chunk = event["chunk"]
+                completion += chunk["bytes"].decode()
+        return completion
+
+    try:
+        # Run the synchronous AWS operations in a thread pool
+        loop = asyncio.get_event_loop()
+        completion = await asyncio.wait_for(
+            loop.run_in_executor(None, _sync_aws_call),
+            timeout=timeout
+        )
+        return completion
+    except asyncio.TimeoutError:
+        return f"Error running AWS agent: Request exceeded set timeout of {timeout} seconds."
+    except BotoCoreError as e:
+        return f"Error running AWS agent: {e}"
+    except Exception as e:
+        return f"Error running AWS agent: {e}"

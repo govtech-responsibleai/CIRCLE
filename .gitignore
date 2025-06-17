@@ -198,3 +198,5 @@ cython_debug/
 
 # Data
 *.csv
+results/overall_analysis/key_results.json
+results/overall_analysis.txt

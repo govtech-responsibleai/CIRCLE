@@ -33,6 +33,7 @@ from utils import (
     run_google_model,
     run_mistral_model,
     run_oai_model,
+    run_aws_agent,
 )
 from utils.judge import JudgeResponse
 from utils.system_prompts import ASSISTANT_SYSTEM_PROMPT
@@ -42,7 +43,7 @@ from utils.system_prompts import ASSISTANT_SYSTEM_PROMPT
 # Constants
 # ------------------------------------------------------------
 
-TIMEOUT: int = 60 * 3  # 3 minutes
+TIMEOUT: int = 60 * 5  # 5 minutes
 CONCURRENCY: int = 50
 
 FUNCTION_MAPPING = {
@@ -50,6 +51,7 @@ FUNCTION_MAPPING = {
     "google": run_google_model,
     "mistral": run_mistral_model,
     "openai": run_oai_model,
+    "aws": run_aws_agent,
 }
 
 
@@ -73,12 +75,19 @@ async def process_prompt(prompt: str, model_name: str) -> tuple[JudgeResponse, s
         logger.debug(f"Processing prompt for model {model_name}: {prompt[:100]}...")
         provider = get_provider_from_model(model_name)
         llm_function = FUNCTION_MAPPING[provider]
-        response = await llm_function(
-            system_prompt=ASSISTANT_SYSTEM_PROMPT,
-            prompt=prompt,
-            model=model_name,
-            timeout=TIMEOUT,
-        )
+        if provider == "aws":
+            response = await llm_function(
+                prompt=prompt,
+                model=model_name,
+                timeout=TIMEOUT,
+            )
+        else:
+            response = await llm_function(
+                system_prompt=ASSISTANT_SYSTEM_PROMPT,
+                prompt=prompt,
+                model=model_name,
+                timeout=TIMEOUT,
+            )
         logger.debug(f"Got response from model {model_name}: {response}...")
 
         if "Request exceeded set timeout" in response:

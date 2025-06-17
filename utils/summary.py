@@ -38,6 +38,8 @@ def get_provider_from_model(model_name: str) -> str:
         return "google"
     if "mistral" in name or "magistral" in name:
         return "mistral"
+    if "nova" in name:
+        return "aws"
     return "unknown"
 
 
