@@ -79,10 +79,11 @@ async def process_prompt(prompt: str, model_name: str) -> tuple[JudgeResponse, s
             model=model_name,
             timeout=TIMEOUT,
         )
-        if isinstance(response, str):
-            logger.debug(f"Got response from model {model_name}: {response}...")
-        else:
-            logger.debug(f"Got response from model {model_name}: {response.model_dump_json()}")
+        logger.debug(f"Got response from model {model_name}: {response}...")
+
+        if "Request exceeded set timeout" in response:
+            logger.error(f"Request exceeded set timeout for model {model_name}")
+            return JudgeResponse(reasoning="Request exceeded set timeout", answer="timeout"), response
         
         result: JudgeResponse = await judge_response(prompt, response)
         logger.debug(f"Judge result for model {model_name}: {result}")

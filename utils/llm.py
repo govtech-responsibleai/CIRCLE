@@ -91,11 +91,11 @@ async def run_anthropic_model(
         timeout: Maximum time in seconds to wait for the API call.
 
     Returns:
-        The model response, or an error string if the call fails or times out.
+        The parsed model response, or an error string if the call fails or times out.
     """
     anthropic_client = AsyncAnthropic(api_key=get_env_var("ANTHROPIC_API_KEY"))
 
-    return await run_model(
+    response = await run_model(
         client_method=anthropic_client.beta.messages.create,
         method_kwargs={
             "model": model,
@@ -108,6 +108,28 @@ async def run_anthropic_model(
         timeout=timeout,
         error_prefix="Error running Anthropic model",
     )
+
+    if isinstance(response, str):
+        return response
+    
+    parsed_response = ""
+
+    for content_block in response.content:
+        if content_block.type == "text":
+            parsed_response += content_block.text
+        elif content_block.type == "server_tool_use" and content_block.name == "code_execution":
+            parsed_response += "\n<CODE>\n"
+            parsed_response += content_block.input.get("code", "")
+            parsed_response += "\n```\n</CODE>\n"
+        elif content_block.type == "code_execution_tool_result":
+            parsed_response += "<OUTPUT>\n"
+            if hasattr(content_block.content, 'stdout') and content_block.content.stdout:
+                parsed_response += content_block.content.stdout
+            if hasattr(content_block.content, 'stderr') and content_block.content.stderr:
+                parsed_response += f"STDERR: {content_block.content.stderr}\n"
+            parsed_response += "</OUTPUT>\n"
+
+    return parsed_response
 
 
 # ------------------------------------------------------------
@@ -131,11 +153,11 @@ async def run_google_model(
         timeout: Maximum time in seconds to wait for the API call.
 
     Returns:
-        The model response, or an error string if the call fails or times out.
+        The parsed model response, or an error string if the call fails or times out.
     """
     google_client = genai.Client(api_key=get_env_var("GOOGLE_API_KEY"))
 
-    return await run_model(
+    response = await run_model(
         client_method=google_client.aio.models.generate_content,
         method_kwargs={
             "model": model,
@@ -151,6 +173,26 @@ async def run_google_model(
         error_prefix="Error running Google model",
     )
 
+    if isinstance(response, str):
+        return response
+    
+    parsed_response = ""
+
+    for part in response.candidates[0].content.parts:
+        if part.text is not None:
+            parsed_response += part.text
+        if part.executable_code is not None:
+            parsed_response += "\n<CODE>\n"
+            parsed_response += part.executable_code.code
+            parsed_response += "\n```\n</CODE>\n"
+        if part.code_execution_result is not None:
+            parsed_response += "<OUTPUT>\n"
+            parsed_response += part.code_execution_result.output
+            parsed_response += "</OUTPUT>\n"
+
+    return parsed_response
+
+
 
 # ------------------------------------------------------------
 # Mistral Model Runner
@@ -160,7 +202,7 @@ async def run_google_model(
 async def run_mistral_model(
     system_prompt: str,
     prompt: str,
-    model: str = "mistral-small-latest",
+    model: str = "mistral-medium-latest",
     timeout: float = 30.0,
 ) -> Union[Any, str]:
     """
@@ -173,7 +215,7 @@ async def run_mistral_model(
         timeout: Maximum time in seconds to wait for the API call.
 
     Returns:
-        The model response, or an error string if the call fails or times out.
+        The parsed model response, or an error string if the call fails or times out.
     """
     mistral_client = Mistral(api_key=get_env_var("MISTRAL_API_KEY"))
 
@@ -184,24 +226,36 @@ async def run_mistral_model(
             description="Agent used to execute code using the interpreter tool.",
             instructions=system_prompt,
             tools=[{"type": "code_interpreter"}],
-            completion_args={
-                "temperature": 0.3,
-                "top_p": 0.95,
-            },
+            completion_args={"temperature": 0.3, "top_p": 0.95},
         )
-
-        response = await mistral_client.beta.conversations.start_async(
+        return await mistral_client.beta.conversations.start_async(
             agent_id=code_agent.id, inputs=prompt
         )
 
-        return response
-
-    return await run_model(
+    resp = await run_model(
         client_method=_mistral_call,
         method_kwargs={},
         timeout=timeout,
         error_prefix="Error running Mistral model",
     )
+    if isinstance(resp, str):
+        return resp
+    
+    # print(resp)  # Optionally keep for debugging
+
+    parsed = ""
+    outputs = getattr(resp, 'outputs', [])
+    for entry in outputs:
+        typ = getattr(entry, 'type', None)
+        if typ == 'message.output':
+            parsed += getattr(entry, 'content', '')
+        elif typ == 'tool.execution':
+            info = getattr(entry, 'info', {})
+            code = info.get('code', '')
+            outp = info.get('code_output', '')
+            parsed += f"\n<CODE>\n{code}\n```\n</CODE>\n"
+            parsed += f"<OUTPUT>\n{outp}</OUTPUT>\n"
+    return parsed
 
 
 # ------------------------------------------------------------
@@ -228,15 +282,41 @@ async def run_oai_model(
         The model response, or an error string if the call fails or times out.
     """
     openai_client = AsyncOpenAI(api_key=get_env_var("OPENAI_API_KEY"))
-
-    return await run_model(
+    resp = await run_model(
         client_method=openai_client.responses.create,
         method_kwargs={
             "model": model,
             "tools": [{"type": "code_interpreter", "container": {"type": "auto"}}],
             "instructions": system_prompt,
             "input": prompt,
+            "include": ["code_interpreter_call.outputs"],
         },
         timeout=timeout,
         error_prefix="Error running OpenAI model",
     )
+    if isinstance(resp, str):
+        return resp
+    
+    parsed = ""
+    outputs = getattr(resp, 'output', [])
+    for entry in outputs:
+        typ = getattr(entry, 'type', None)
+        # Handle text messages
+        if typ == 'message':
+            content = getattr(entry, 'content', [])
+            for part in content:
+                text = getattr(part, 'text', None)
+                if text:
+                    parsed += text
+        # Handle code interpreter calls
+        elif typ == 'code_interpreter_call':
+            code = getattr(entry, 'code', None)
+            if code:
+                parsed += f"\n<CODE>\n{code}\n```\n</CODE>\n"
+            outputs_list = getattr(entry, 'outputs', [])
+            for out in outputs_list:
+                out_type = out.get('type')
+                if out_type == 'logs':
+                    logs = out.get('logs', '')
+                    parsed += f"<OUTPUT>\n{logs}</OUTPUT>\n"
+    return parsed

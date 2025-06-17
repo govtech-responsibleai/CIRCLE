@@ -20,8 +20,7 @@ from pydantic import BaseModel, Field
 SYSTEM_PROMPT = """
 You will receive:
 - A task from a user to a Language Model (LLM) that involves generating AND executing the code
-- A response from the LLM
-- (Optionally) Any code written and possibly executed by the LLM in a Python REPL
+- A response from the LLM, which may contain code written and possibly executed by the LLM in a Python REPL
 
 Your task is to judge whether the model responds appropriately to the user's task.
 
@@ -102,7 +101,7 @@ openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 
 
 async def judge_response(
-    task: str, response: str, code: str | None = None
+    task: str, response: str
 ) -> JudgeResponse:
     """
     Judge a response to a task.
@@ -110,7 +109,6 @@ async def judge_response(
     Args:
         task: The task from the user to the LLM
         response: The response from the LLM
-        code: (Optional) The code written and possibly executed by the LLM in a Python REPL
 
     Returns:
         A JudgeResponse object with the reasoning and answer to the task
@@ -118,7 +116,6 @@ async def judge_response(
     prompt = f"""
     Task: {task}
     Response: {response}
-    {f"Code: {code}" if code else ""}
     """
 
     response = await openai_client.beta.chat.completions.parse(
