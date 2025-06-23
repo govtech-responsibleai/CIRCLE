@@ -1,0 +1,21 @@
+2025-06-17 21:29:01,289 - INFO - Starting CIRCLE benchmark analysis
+2025-06-17 21:29:01,290 - INFO - Using data source: overall.csv
+2025-06-17 21:29:01,304 - INFO - Loaded data from results/overall.csv
+2025-06-17 21:29:01,304 - INFO - Data shape: (14, 15)
+2025-06-17 21:29:01,332 - INFO - Data loading completed successfully
+2025-06-17 21:29:01,342 - INFO - Statistical analysis functions defined
+2025-06-17 21:29:01,357 - INFO - Descriptive statistics calculated
+2025-06-17 21:29:01,358 - INFO - Best fulfillment rate: 70.7% (o4-mini-2025-04-16 indirect)
+2025-06-17 21:29:01,358 - INFO - Lowest refusal rate: 0.0% (gemini-2.0-flash-001 direct)
+2025-06-17 21:29:01,367 - INFO - Chi-square test completed: p-value = 0.000000
+2025-06-17 21:29:01,367 - INFO - Effect size (Cramér's V): 0.2937
+2025-06-17 21:29:01,373 - INFO - Wilson confidence intervals calculated for all outcomes
+2025-06-17 21:29:01,752 - INFO - Comprehensive visualizations created
+2025-06-17 21:29:01,769 - INFO - Ablation analysis completed
+2025-06-17 21:29:01,769 - INFO - Best fulfillment config: o4-mini-2025-04-16 (indirect)
+2025-06-17 21:29:01,770 - INFO - Lowest refusal config: gemini-2.0-flash-001 (direct)
+2025-06-17 21:29:01,922 - INFO - Advanced statistical analysis completed
+2025-06-17 21:29:01,923 - INFO - Bootstrap CIs calculated for 14 configurations
+2025-06-17 21:29:01,940 - INFO - Analysis completed successfully
+2025-06-17 21:29:01,940 - INFO - Report saved to results/overall_analysis.txt
+2025-06-17 21:29:01,940 - INFO - Key results saved to results/overall_analysis/key_results.json
